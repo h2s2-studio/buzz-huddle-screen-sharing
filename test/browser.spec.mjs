@@ -26,6 +26,7 @@ test.afterAll(async () => {
 });
 
 async function shareAndLeave(page, viewer) {
+	test.setTimeout(45_000);
 	await Promise.all([page.goto(fixture), viewer.goto(fixture)]);
 	for (const client of [page, viewer]) {
 		await client.getByRole("button", { name: "Screen sharing" }).click();
@@ -41,7 +42,18 @@ async function shareAndLeave(page, viewer) {
 		.getByRole("button", { name: "Watch screen", exact: true })
 		.click();
 	const video = viewer.locator('video[aria-label="Shared screen"]');
-	await expect(video).toBeVisible();
+	try {
+		// Let the plugin's connection deadline elapse so failures show its final state.
+		await expect(video).toBeVisible({ timeout: 22000 });
+	} catch (error) {
+		const [presenterStatus, viewerStatus] = await Promise.all([
+			page.locator("main").innerText(),
+			viewer.locator("main").innerText(),
+		]);
+		throw new Error(`Presenter:\n${presenterStatus}\n\nViewer:\n${viewerStatus}`, {
+			cause: error,
+		});
+	}
 	await expect
 		.poll(() => video.evaluate((element) => element.currentTime))
 		.toBeGreaterThan(0);
@@ -102,7 +114,11 @@ test("a Chromium presenter shares with a WebKit viewer", async ({
 	browserName,
 }) => {
 	test.skip(browserName !== "webkit", "Run this mixed-engine case on the WebKit runner");
-	const other = await chromium.launch();
+	// CI runners may block multicast between browser processes. Both test peers
+	// run on the same machine, so advertise Chromium's numeric ICE addresses.
+	const other = await chromium.launch({
+		args: ["--disable-features=WebRtcHideLocalIpsWithMdns"],
+	});
 	try {
 		await shareAndLeave(await other.newPage(), page);
 	} finally {
