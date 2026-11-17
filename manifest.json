@@ -1,0 +1,10 @@
+{
+	"id": "studio.h2s2.screen-sharing",
+	"name": "Huddle Screen Sharing",
+	"apiVersion": 1,
+	"description": "Test screen capture locally or share a window or display during a Huddle using a configured signaling service.",
+	"discovery": {
+		"category": "communication",
+		"tags": ["huddles", "screen-sharing"]
+	}
+}
