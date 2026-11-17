@@ -1,0 +1,10 @@
+FROM rust:1.98.1-bookworm AS build
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY crates/buzz-streams-room-service ./crates/buzz-streams-room-service
+RUN cargo build --locked --release -p buzz-streams-room-service
+
+FROM debian:bookworm-slim
+COPY --from=build /build/target/release/buzz-streams-room-service /usr/local/bin/
+USER 65534:65534
+ENTRYPOINT ["/usr/local/bin/buzz-streams-room-service"]

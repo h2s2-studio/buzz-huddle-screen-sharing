@@ -1,0 +1,24 @@
+[workspace]
+members = ["crates/buzz-streams-room-service"]
+resolver = "2"
+
+[workspace.package]
+version = "0.3.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/h2s2-studio/buzz-huddle-screen-sharing"
+
+[workspace.dependencies]
+# Match the Buzz relay's runtime, HTTP, serialization and observability stack.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
+axum = { version = "0.8", features = ["ws"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+base64 = "0.22"
+rand = "0.10"
+sha2 = "0.11"
+subtle = "2.6"
+url = "2"

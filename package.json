@@ -1,23 +1,32 @@
 {
   "name": "h2s2-buzz-screen-sharing",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "start": "node server/index.mjs",
+    "start": "cargo run --locked -p buzz-streams-room-service",
     "test": "node --test test/signaling.test.mjs",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "start:legacy": "node server/index.mjs",
+    "build": "tsc && node scripts/build.mjs",
+    "check:build": "tsc && node scripts/build.mjs --check",
+    "test:media": "node scripts/test-media.mjs"
   },
   "dependencies": {
+    "livekit-client": "2.24.1",
     "ws": "8.23.0"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "esbuild": "0.28.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "vite": "8.3.0"
+    "typescript": "6.0.3",
+    "vite": "8.3.8"
   }
 }

@@ -1,94 +1,82 @@
 # Huddle Screen Sharing for Buzz
 
-An H2S2 Studio prototype packaged as an installable Buzz desktop plugin. The
-presenter and viewer stay in their normal Buzz apps. Huddle audio uses the
-existing Buzz relay. The plugin opens a screen-sharing panel beside the
-conversation. Remote sharing uses a separate WebSocket service to establish a
-video-only WebRTC connection. It uses public plugin API v1 and requires a Buzz desktop
-build with `huddleStatus` and channel panel launchers, such as Buzz 1.0.4.
+An H2S2 Studio plugin for sharing and watching screens inside Buzz Desktop.
+Multiple Huddle participants can publish at once. Viewers pick one stream,
+switch between presenters, and keep their Buzz voice call connected.
 
 ## Install from GitHub
 
-In Buzz Desktop open **Settings → Plugins → Manage plugins → Add**. Paste
+In Buzz Desktop, open **Settings → Plugins → Manage plugins → Add**. Paste
 `https://github.com/h2s2-studio/buzz-huddle-screen-sharing` into **Git or GitHub
-repository**, leave **Folder** blank, then select **Find** and **Install plugin**.
-Enable the plugin in Manage plugins. Leave **Branch or tag** blank to follow the
-default branch with Buzz’s **Check for updates**, or enter `v0.2.0` to pin the
-initial prerelease. The repository root contains the built plugin.
-Buzz loads it directly. Node.js is needed to run or test the signaling service.
+repository**, leave **Folder** blank, then select **Find → Install plugin** and
+enable it. Use **Branch or tag** to pin a tagged release. Leave it blank to
+follow the default branch with **Check for updates**. Buzz reads the committed
+`manifest.json` and `plugin.js` from the root and builds nothing at install time.
 
-If you previously installed a local copy, remove that installation in Manage
-plugins before adding the GitHub version so Buzz can track the repository as its
-source.
+If you installed a local copy, remove it before installing from GitHub so Buzz
+records GitHub as the update source. For the original one-presenter,
+one-viewer WebSocket setup, pin [v0.2.0](https://github.com/h2s2-studio/buzz-huddle-screen-sharing/tree/v0.2.0).
 
-## Test by yourself
+## Try it on one device
 
-After installing in Buzz Desktop, open a conversation and select
-**Screen sharing → Test my screen**. Choose a window or display in the system
-picker. Buzz sends the video through two WebRTC peers inside the same window
-and displays the result. Choose **Stop test** or close the panel to release
-capture. The local test works without joining a Huddle or setting up a signaling
-service. A live share also exercises connectivity to the other participant.
+Open **Streams → Test my screen** from a conversation and select a source in the
+system picker. The test sends video between two WebRTC peers inside the same
+Buzz window. It works without a Huddle or a server. Select **Stop test** or
+close the panel to release capture.
 
-## Start the signaling service
+## Share in a Huddle
 
-Use Node.js 22 or later. From this repository's root, run these commands:
+1. Everyone installs the plugin and joins the Huddle in Buzz.
+2. One organizer opens **Streams → Start a session** and enters their
+   deployment’s room service URL and creation key.
+3. The organizer sends the **Session invite** to the group in Buzz. Recipients
+   open it in Buzz and select **Join streams**. They can also paste it into the
+   Streams panel. They only need the invite and a display name.
+4. Select a presenter preset and **Share screen**. The system picker shows the
+   displays, windows, or apps supported by the installed platform. **Change
+   source** keeps the same stream and preserves the old source if canceled.
+5. Select **Watch stream** beside a presenter. **Viewer quality** shows Auto and
+   the advertised layers for that stream. The player displays the actual
+   incoming resolution and offers **Fullscreen**. You can watch while sharing.
 
-```sh
-npm ci --omit=dev
-npm start
-```
+**Stop sharing** is also available in the Buzz toolbar while capture is active.
+Switching conversations keeps the stream open. Leaving the Huddle ends the
+local media session and stops capture. Streams carry screen video. Buzz
+continues to handle voice. System audio is outside this prerelease.
 
-The service listens on `127.0.0.1:8090` by default. Override `HOST` or `PORT`
-when running behind a reverse proxy. Publish `/signal` over a trusted TLS
-domain and forward WebSocket upgrades to the service. Both participants enter
-the same address, such as `wss://screens.example.org/signal`. A GET to `/health`
-is available for health checks. The service stores active sessions in memory.
+## Host a deployment
 
-Host ICE candidates are used by default for a same-network test. Set the
-`ICE_SERVERS` environment variable to a JSON array of standard `RTCIceServer`
-objects to use your STUN or TURN infrastructure. Both participants receive this
-configuration. Use credentials suitable for distribution to the participants.
+One operator runs the **Rust room service** and **LiveKit** for their community.
+They can run alongside a Buzz relay on a Linux VM. Other users install the plugin
+and open the invite inside Buzz. See the [deployment guide](docs/deployment.md).
 
-## Install and try
+Room admission uses a 15-minute invite and a short-lived LiveKit token restricted
+to the room and screen-share publishing. Anyone with the link can request access
+during its lifetime. Send links to the intended participants. Buzz plugin API v1
+exposes local call phase and does not verify who is in the same Huddle. The
+[upstream design](docs/product.md) describes the integration needed for that.
 
-1. Install the plugin from GitHub in regular Buzz Desktop on both devices.
-2. Join the same Huddle. In the conversation header, open **Screen sharing** and
-   enter the signaling URL in both panels.
-3. The presenter chooses **Share screen** and selects a display or window in the
-   system picker. Send the code to the intended viewer, for example over a Buzz
-   DM. The viewer enters it and chooses **Watch screen**.
-4. Stop, close the panel, or leave the Huddle to end the video connection.
+## Authoring and verification
 
-## Access and platform scope
-
-Buzz API v1 gives this plugin the local call phase. Possession of the share code
-grants access to one viewer. Invitations expire after five minutes and are consumed when a viewer connects.
-Choose a signaling service you trust. It exchanges the connection descriptions
-and ICE configuration. WebRTC handles the video stream separately.
-
-The plugin uses the desktop webview’s `getDisplayMedia` API. Two-device tests
-with the native picker in stock Buzz are pending. Linux WebKitGTK commonly denies
-unhandled display permission requests, and Buzz 1.0.4's permission handler
-specifically grants microphone requests. Linux presenting needs a host fix or
-an OS capture integration. Verify receiving on the target Linux build before
-claiming platform support. Both participants need the installed plugin.
-
-## Verification
+The plugin source uses TypeScript and TSX. Buzz supplies React. The build emits a
+self-contained JavaScript module and CI checks it against the committed artifact.
+The sidecar lives in the Rust workspace under `crates/buzz-streams-room-service`.
 
 ```sh
 npm ci
-npm test
+npm run build
+npm run check:build
+cargo test --locked --workspace
+cargo build --locked
 npx playwright install chromium webkit
-npm run test:browser
+LIVEKIT_SERVER_BIN=livekit-server npm run test:media
 ```
 
-The browser tests exercise single-device playback without a connection to the
-signaling service, as well as real WebRTC video and signaling between two
-browser sessions. The fixture supplies the Huddle state and an artificial
-capture stream. CI runs Chromium on Ubuntu and WebKit on macOS, including a
-Chromium-to-WebKit share on macOS.
+Media tests launch the Rust service and a real local LiveKit instance. They use
+synthetic capture tracks to verify solo playback, multi-presenter playback,
+quality changes, source replacement, and teardown. Native Windows and Linux
+screen capture still need physical device checks. Linux may require Buzz to
+grant display-capture permission through its webview host.
 
-To make a release artifact, use the [Buzz plugin packer](https://github.com/block/buzz-app/blob/v1.0.4/docs/plugin-architecture.md#plugin-release-signing)
-with the repository root. Release tags designate immutable plugin versions.
-See the [product proposal](docs/product.md) for planned multi-stream behavior.
+Build a standalone artifact with
+`buzzodz plugin pack . huddle-screen-sharing.buzzplugin`.

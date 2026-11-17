@@ -1,0 +1,13 @@
+streams.example.org {
+    handle /rooms {
+        reverse_proxy 127.0.0.1:8091
+    }
+
+    handle /health {
+        reverse_proxy 127.0.0.1:8091
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:7880
+    }
+}

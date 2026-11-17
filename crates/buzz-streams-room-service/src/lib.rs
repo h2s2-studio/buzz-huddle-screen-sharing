@@ -1,0 +1,235 @@
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use axum::{
+    extract::{
+        ws::{Message, WebSocket},
+        State, WebSocketUpgrade,
+    },
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Router,
+};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use livekit_api::access_token::{AccessToken, VideoGrants};
+use livekit_protocol::RoomConfiguration;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
+use tokio::{sync::Semaphore, time::timeout};
+use url::Url;
+
+const INVITE_TTL: Duration = Duration::from_secs(15 * 60);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_INVITES: usize = 128;
+const MAX_HANDSHAKES: usize = 64;
+const MAX_MESSAGE_BYTES: usize = 2048;
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum Request {
+    Create { name: String, key: String },
+    Join { name: String, code: String },
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum Reply<'a> {
+    Admitted {
+        url: &'a str,
+        token: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        invite: Option<Invite>,
+    },
+    Error {
+        error: &'static str,
+    },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Invite {
+    code: String,
+    expires_at: u64,
+}
+
+struct Room {
+    name: String,
+    expires_at: u64,
+}
+
+pub struct RoomService {
+    livekit_url: Url,
+    api_key: String,
+    api_secret: String,
+    creation_key_digest: [u8; 32],
+    invitations: Mutex<HashMap<String, Room>>,
+    handshakes: Arc<Semaphore>,
+}
+
+impl RoomService {
+    pub fn new(livekit_url: Url, api_key: String, api_secret: String, creation_key: &str) -> Self {
+        Self {
+            livekit_url,
+            api_key,
+            api_secret,
+            creation_key_digest: Sha256::digest(creation_key.as_bytes()).into(),
+            invitations: Mutex::default(),
+            handshakes: Arc::new(Semaphore::new(MAX_HANDSHAKES)),
+        }
+    }
+
+    fn admit(&self, request: Request, now: u64) -> Result<Reply<'_>, &'static str> {
+        let mut invitations = self
+            .invitations
+            .lock()
+            .map_err(|_| "Room service unavailable.")?;
+        invitations.retain(|_, room| room.expires_at > now);
+        let (name, room_name, invite) = match request {
+            Request::Create { name, key } => {
+                let key_digest = Sha256::digest(key.as_bytes());
+                if !bool::from(self.creation_key_digest.ct_eq(key_digest.as_slice())) {
+                    return Err("The room creation key was rejected.");
+                }
+                if invitations.len() >= MAX_INVITES {
+                    return Err("The room service is busy.");
+                }
+                let invite = Invite {
+                    code: random_code(),
+                    expires_at: now + INVITE_TTL.as_millis() as u64,
+                };
+                (name, format!("buzz-{}", random_code()), Some(invite))
+            }
+            Request::Join { name, code } => {
+                let room = invitations
+                    .get(&code)
+                    .ok_or("This invite is invalid or has expired.")?;
+                (name, room.name.clone(), None)
+            }
+        };
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 48 || name.chars().any(char::is_control) {
+            return Err("Enter a display name of 1–48 characters.");
+        }
+        let token = AccessToken::with_api_key(&self.api_key, &self.api_secret)
+            .with_identity(&random_code())
+            .with_name(name)
+            .with_ttl(Duration::from_secs(90))
+            .with_grants(VideoGrants {
+                room: room_name.clone(),
+                room_join: true,
+                can_subscribe: Some(true),
+                can_publish: Some(true),
+                can_publish_sources: vec!["screen_share".into()],
+                can_publish_data: Some(false),
+                can_update_own_metadata: Some(false),
+                ..Default::default()
+            })
+            .with_room_config(RoomConfiguration {
+                max_participants: 12,
+                empty_timeout: 120,
+                departure_timeout: 20,
+                ..Default::default()
+            })
+            .to_jwt()
+            .map_err(|_| {
+                tracing::error!("could not sign media admission");
+                "Could not issue media admission."
+            })?;
+        if let Some(invite) = &invite {
+            invitations.insert(
+                invite.code.clone(),
+                Room {
+                    name: room_name,
+                    expires_at: invite.expires_at,
+                },
+            );
+        }
+        Ok(Reply::Admitted {
+            url: self.livekit_url.as_str(),
+            token,
+            invite,
+        })
+    }
+}
+
+fn random_code() -> String {
+    URL_SAFE_NO_PAD.encode(rand::random::<[u8; 24]>())
+}
+
+pub fn router(rooms: RoomService) -> Router {
+    Router::new()
+        .route("/health", get(|| async { StatusCode::OK }))
+        .route("/rooms", get(upgrade))
+        .with_state(Arc::new(rooms))
+}
+
+async fn upgrade(State(rooms): State<Arc<RoomService>>, ws: WebSocketUpgrade) -> Response {
+    let Ok(permit) = rooms.handshakes.clone().try_acquire_owned() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    ws.max_message_size(MAX_MESSAGE_BYTES)
+        .max_frame_size(MAX_MESSAGE_BYTES)
+        .on_upgrade(move |socket| async move {
+            let _permit = permit;
+            let _ = timeout(REQUEST_TIMEOUT, admit_socket(socket, rooms)).await;
+        })
+}
+
+async fn admit_socket(mut socket: WebSocket, rooms: Arc<RoomService>) {
+    let Some(Ok(Message::Text(message))) = socket.recv().await else {
+        return;
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let reply = serde_json::from_str::<Request>(&message)
+        .map_err(|_| "Invalid room request.")
+        .and_then(|request| rooms.admit(request, now.as_millis() as u64))
+        .unwrap_or_else(|error| Reply::Error { error });
+    if let Ok(text) = serde_json::to_string(&reply) {
+        let _ = socket.send(Message::Text(text.into())).await;
+    }
+    let _ = socket.send(Message::Close(None)).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn room_admission_requires_creation_key_or_current_invite() {
+        let key = "test-creation-key-only-for-tests";
+        let service = RoomService::new(
+            Url::parse("ws://127.0.0.1:7880").unwrap(),
+            "devkey".into(),
+            "secret".into(),
+            key,
+        );
+        let create = |key: &str| Request::Create {
+            name: "Presenter".into(),
+            key: key.into(),
+        };
+        assert!(service.admit(create("incorrect"), 0).is_err());
+        let Reply::Admitted {
+            invite: Some(invite),
+            ..
+        } = service.admit(create(key), 0).unwrap()
+        else {
+            panic!("creator should get an invite");
+        };
+        let join = || Request::Join {
+            name: "Viewer".into(),
+            code: invite.code.clone(),
+        };
+        assert!(matches!(
+            service.admit(join(), invite.expires_at - 1),
+            Ok(Reply::Admitted { invite: None, .. })
+        ));
+        assert!(service.admit(join(), invite.expires_at).is_err());
+    }
+}

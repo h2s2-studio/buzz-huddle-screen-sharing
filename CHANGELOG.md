@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.0
+
+- Added multi-presenter rooms, in-Buzz invites, selective playback, viewer
+  quality and resolution, presenter presets, and source replacement.
+- Added a toolbar stop control that stays available while navigating Buzz.
+- Moved plugin authoring to TypeScript and kept the generated JavaScript at the
+  GitHub install root.
+- Added a Rust room service and self-hosted LiveKit deployment sample.
+  The v0.2.0 tag still installs the original one-viewer plugin.
+
 ## 0.2.0 · 2026-11-16
 
 - Install directly from the H2S2 Studio GitHub repository using Buzz’s Git importer.
