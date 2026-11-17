@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { test, expect, webkit } from "@playwright/test";
+import { test, expect, chromium } from "@playwright/test";
 import { createServer } from "vite";
 import { createSignaling } from "../server/index.mjs";
 
@@ -101,10 +101,10 @@ test("a Chromium presenter shares with a WebKit viewer", async ({
 	page,
 	browserName,
 }) => {
-	test.skip(browserName !== "chromium", "Run this mixed-engine case once");
-	const other = await webkit.launch();
+	test.skip(browserName !== "webkit", "Run this mixed-engine case on the WebKit runner");
+	const other = await chromium.launch();
 	try {
-		await shareAndLeave(page, await other.newPage());
+		await shareAndLeave(await other.newPage(), page);
 	} finally {
 		await other.close();
 	}

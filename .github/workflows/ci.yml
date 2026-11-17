@@ -10,8 +10,20 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.project }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium
+            runner: ubuntu-24.04
+            browser-install: --with-deps chromium
+          # Test WebKit's media stack on the OS used by the Buzz macOS webview.
+          - project: webkit
+            runner: macos-15
+            browser-install: chromium webkit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -22,5 +34,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npx playwright install --with-deps chromium webkit
-      - run: npm run test:browser
+      - run: npx playwright install ${{ matrix.browser-install }}
+      - run: npm run test:browser -- --project=${{ matrix.project }}

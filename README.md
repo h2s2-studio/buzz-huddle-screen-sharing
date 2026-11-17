@@ -12,8 +12,9 @@ build with `huddleStatus` and channel panel launchers, such as Buzz 1.0.4.
 In Buzz Desktop open **Settings → Plugins → Manage plugins → Add**. Paste
 `https://github.com/h2s2-studio/buzz-huddle-screen-sharing` into **Git or GitHub
 repository**, leave **Folder** blank, then select **Find** and **Install plugin**.
-Leave **Branch or tag** blank to follow the default branch, or enter `v0.2.0`
-for the initial prerelease. The repository root contains the built plugin.
+Enable the plugin in Manage plugins. Leave **Branch or tag** blank to follow the
+default branch with Buzz’s **Check for updates**, or enter `v0.2.0` to pin the
+initial prerelease. The repository root contains the built plugin.
 Buzz loads it directly. Node.js is needed to run or test the signaling service.
 
 If you previously installed a local copy, remove that installation in Manage
@@ -66,8 +67,8 @@ grants access to one viewer. Invitations expire after five minutes and are consu
 Choose a signaling service you trust. It exchanges the connection descriptions
 and ICE configuration. WebRTC handles the video stream separately.
 
-The plugin uses the desktop webview's `getDisplayMedia` API. Physical macOS and
-Windows picker tests in stock Buzz are pending. Linux WebKitGTK commonly denies
+The plugin uses the desktop webview’s `getDisplayMedia` API. Two-device tests
+with the native picker in stock Buzz are pending. Linux WebKitGTK commonly denies
 unhandled display permission requests, and Buzz 1.0.4's permission handler
 specifically grants microphone requests. Linux presenting needs a host fix or
 an OS capture integration. Verify receiving on the target Linux build before
@@ -85,8 +86,8 @@ npm run test:browser
 The browser tests exercise single-device playback without a connection to the
 signaling service, as well as real WebRTC video and signaling between two
 browser sessions. The fixture supplies the Huddle state and an artificial
-capture stream. The installed OS picker and a hosted TLS deployment still
-need a live test.
+capture stream. CI runs Chromium on Ubuntu and WebKit on macOS, including a
+Chromium-to-WebKit share on macOS.
 
 To make a release artifact, use the [Buzz plugin packer](https://github.com/block/buzz-app/blob/v1.0.4/docs/plugin-architecture.md#plugin-release-signing)
 with the repository root. Release tags designate immutable plugin versions.
