@@ -7,6 +7,8 @@
 - Use a monitor icon in the conversation header with an active-sharing marker.
 - Place the share, invite and stop controls above the preview. Offer a selectable
   invite link when clipboard access is denied.
+- Use **Screen sharing** and a shorter description in the plugin catalog.
+  Package a monitor tile for hosts that display installed plugin artwork.
 
 ## v0.3.1
 

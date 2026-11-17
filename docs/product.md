@@ -26,6 +26,33 @@ system and leaves microphone capture, voice, and conversation navigation with Bu
   selectable copy of the invite. Show picker and connection errors above the
   current controls so the user can retry without looking below the player.
 
+## Plugin catalog artwork
+
+The package includes a cyan-to-teal monitor tile in `icon.png`. Stock Buzz
+1.0.4 uses its bundled icon registry for the Settings catalog. A host change can
+load the validated PNG or JPEG for an installed plugin and render it in the
+same tile, using the installed revision as its cache key. The catalog's
+publisher and trust indicators remain host-owned.
+
+## Voice channels
+
+Use a persistent named channel as the place people join for voice. The sidebar
+shows who is in the active Huddle and who is sharing. A member can join, mute
+or leave from that entry. Audio starts on join, and the next person can start
+a new Huddle when the room is empty.
+
+Share and watch controls belong in the voice room. Joining voice reveals
+the live streams that room membership permits. The screen picker opens on
+request, and the viewer starts each stream explicitly. Leaving voice removes
+access to that room's streams and stops local capture. Stopping a share or
+leaving the player keeps the person in voice.
+
+An existing named Buzz conversation can already serve as a regular meeting spot
+with native Huddles and the Streams invite flow. A first-class voice channel
+needs a join action and roster in the Buzz sidebar and a relay-verified room
+identity for Streams. The screen transport can stay behind the same room
+identity and lifecycle.
+
 ## How the implementation fits the Buzz codebase
 
 - The Rust room service mirrors the conventions in
