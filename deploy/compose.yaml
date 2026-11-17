@@ -11,6 +11,7 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set a LiveKit API key}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set a LiveKit API secret}
       ROOM_CREATION_KEY: ${ROOM_CREATION_KEY:?Set a random room creation key}
+      ROOM_PROXY_KEY: ${ROOM_PROXY_KEY:-}
   livekit:
     image: livekit/livekit-server:v1.13.11
     network_mode: host

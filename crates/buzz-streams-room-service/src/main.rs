@@ -18,12 +18,15 @@ async fn main() -> Result<()> {
     let listener = TcpListener::bind(config.bind_addr)
         .await
         .context("bind Buzz Streams service")?;
-    let rooms = RoomService::new(
+    let mut rooms = RoomService::new(
         config.livekit_url,
         config.livekit_api_key,
         config.livekit_api_secret,
         &config.room_creation_key,
     );
+    if let Some(key) = &config.room_proxy_key {
+        rooms = rooms.with_proxy_key(key);
+    }
     tracing::info!(addr = %listener.local_addr()?, "Buzz Streams room service listening");
     axum::serve(listener, router(rooms))
         .with_graceful_shutdown(shutdown())

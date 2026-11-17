@@ -9,11 +9,12 @@ pub struct Config {
     pub livekit_api_key: String,
     pub livekit_api_secret: String,
     pub room_creation_key: String,
+    pub room_proxy_key: Option<String>,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        let bind_addr = env::var("BUZZ_STREAMS_BIND_ADDR")
+        let bind_addr: SocketAddr = env::var("BUZZ_STREAMS_BIND_ADDR")
             .unwrap_or_else(|_| "127.0.0.1:8091".into())
             .parse()
             .context("invalid BUZZ_STREAMS_BIND_ADDR")?;
@@ -38,10 +39,26 @@ impl Config {
             (24..=256).contains(&room_creation_key.len()),
             "ROOM_CREATION_KEY must be 24–256 bytes"
         );
+        let room_proxy_key = env::var("ROOM_PROXY_KEY")
+            .ok()
+            .filter(|key| !key.is_empty());
+        if let Some(key) = &room_proxy_key {
+            ensure!(
+                bind_addr.ip().is_loopback(),
+                "ROOM_PROXY_KEY requires a loopback listener"
+            );
+            ensure!(
+                key.len() == 64
+                    && key.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    && key != &room_creation_key,
+                "ROOM_PROXY_KEY must be a separate 64-character hexadecimal key"
+            );
+        }
         Ok(Self {
             bind_addr,
             livekit_url,
             room_creation_key,
+            room_proxy_key,
             livekit_api_key: required("LIVEKIT_API_KEY")?,
             livekit_api_secret: required("LIVEKIT_API_SECRET")?,
         })

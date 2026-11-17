@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.1
+
+- Open the system picker directly from **Share screen**. Create a room after
+  selection through the community’s trusted private proxy.
+- Use the existing Buzz profile name when available and join an invite without
+  a naming step. Keep custom broker setup under **Room service settings**.
+
 ## v0.3.0
 
 - Added multi-presenter rooms, in-Buzz invites, selective playback, viewer

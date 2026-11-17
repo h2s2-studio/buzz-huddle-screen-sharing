@@ -27,17 +27,16 @@ close the panel to release capture.
 ## Share in a Huddle
 
 1. Everyone installs the plugin and joins the Huddle in Buzz.
-2. One organizer opens **Streams → Start a session** and enters their
-   deployment’s room service URL and creation key.
-3. The organizer sends the **Session invite** to the group in Buzz. Recipients
-   open it in Buzz and select **Join streams**. They can also paste it into the
-   Streams panel. They only need the invite and a display name.
-4. Select a presenter preset and **Share screen**. The system picker shows the
-   displays, windows, or apps supported by the installed platform. **Change
-   source** keeps the same stream and preserves the old source if canceled.
-5. Select **Watch stream** beside a presenter. **Viewer quality** shows Auto and
+2. Open **Streams → Share screen**, then choose a source in the system picker.
+   A compatible community deployment creates the session automatically. For a
+   service on another host or one that requires a key, use **Room service settings**.
+3. Copy the **Session invite** into Buzz. Recipients open it and select **Join
+   streams**. They can also paste it into **Join from an invite**. Streams uses their
+   Buzz display names when available.
+4. Select **Watch stream** beside a presenter. **Viewer quality** shows Auto and
    the advertised layers for that stream. The player displays the actual
    incoming resolution and offers **Fullscreen**. You can watch while sharing.
+   **Change source** keeps the same stream and preserves the old source if canceled.
 
 **Stop sharing** is also available in the Buzz toolbar while capture is active.
 Switching conversations keeps the stream open. Leaving the Huddle ends the

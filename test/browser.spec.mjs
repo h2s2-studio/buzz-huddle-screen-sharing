@@ -2,10 +2,20 @@ import { test, expect, chromium } from "@playwright/test";
 import { createServer } from "vite";
 
 let site, fixture;
+const upstream = process.env.BUZZ_TEST_UPSTREAM_URL;
 test.beforeAll(async () => {
   site = await createServer({
     configFile: false,
-    server: { host: "127.0.0.1", port: 0, watch: null },
+    server: { host: "127.0.0.1", port: 0, watch: null, ...(upstream && {
+      proxy: { "/rooms": {
+        target: upstream,
+        ws: true,
+        headers: {
+          "X-Buzz-Streams-Proxy-Key": process.env.BUZZ_TEST_PROXY_KEY,
+          Origin: "tauri://localhost",
+        },
+      } },
+    }) },
   });
   await site.listen();
   fixture = `http://127.0.0.1:${site.httpServer.address().port}/test/fixture.html`;
@@ -40,8 +50,8 @@ test("tests the screen on one device without a Huddle or a signaling connection"
   expect(await page.evaluate(() => window.screenTest.captureStates())).toEqual(["ended", "ended"]);
 });
 
-test("three members can publish, select, change quality and source, and leave", async ({ page, context, browserName }) => {
-  test.skip(!process.env.BUZZ_TEST_ROOM_URL, "Set BUZZ_TEST_ROOM_URL to run the real media test");
+test("starts sharing without setup and switches streams in a three-member room", async ({ page, context, browserName }) => {
+  test.skip(!upstream, "Run npm run test:media for the real media test");
   test.setTimeout(90000);
   const other = browserName === "webkit"
     ? await chromium.launch({ args: ["--disable-features=WebRtcHideLocalIpsWithMdns"] })
@@ -49,28 +59,31 @@ test("three members can publish, select, change quality and source, and leave", 
   try {
     const first = await (other ?? context).newPage();
     const second = await (other ?? context).newPage();
-    await Promise.all([first.goto(fixture), second.goto(fixture), page.goto(fixture)]);
+    await Promise.all([
+      first.goto(`${fixture}?viewer=Alex`),
+      second.goto(`${fixture}?viewer=Riley`),
+      page.goto(`${fixture}?viewer=Viewer`),
+    ]);
     await launcher(first).click();
-    await first.getByRole("button", { name: "Start a session" }).click();
-    await first.getByLabel("Display name").fill("Alex");
-    await first.getByLabel("Room service URL").fill(process.env.BUZZ_TEST_ROOM_URL);
-    await first.getByLabel("Room creation key").fill(process.env.BUZZ_TEST_CREATION_KEY);
-    await first.getByRole("button", { name: "Create room" }).click();
+    await expect(first.getByLabel("Room creation key, if required by your server")).toBeHidden();
+    await first.evaluate(() => window.screenTest.cancelNextCapture());
+    await first.getByRole("button", { name: "Share screen", exact: true }).click();
+    await expect(first.getByRole("alert")).toContainText("Screen selection canceled");
+    expect(await first.evaluate(() => window.screenTest.openedSockets())).toBe(0);
+    await first.getByLabel("Share quality").selectOption("sharp");
+    await first.getByRole("button", { name: "Share screen", exact: true }).click();
     await expect(first.getByLabel("Session invite")).toBeVisible({ timeout: 15000 });
     const invite = await first.getByLabel("Session invite").inputValue();
 
     await launcher(second).click();
-    await second.getByLabel("Display name").fill("Riley");
+    await second.getByText("Join from an invite", { exact: true }).click();
     await second.getByLabel("Invite link").fill(invite);
     await second.getByRole("button", { name: "Join streams" }).click();
     await page.getByLabel("Buzz link").fill(invite);
     await page.getByRole("button", { name: "Open Buzz link" }).click();
-    await expect(page.getByText("Room service on", { exact: false })).toBeVisible();
-    await page.getByLabel("Display name").fill("Viewer");
+    await expect(page.getByText("Sharing session on", { exact: false })).toBeVisible();
     await page.getByRole("button", { name: "Join streams" }).click();
 
-    await first.getByLabel("Share quality").selectOption("sharp");
-    await first.getByRole("button", { name: "Share screen", exact: true }).click();
     await second.getByRole("button", { name: "Share screen", exact: true }).click();
     await expect(watch(page, "Alex")).toBeVisible({ timeout: 12000 });
     await expect(watch(page, "Riley")).toBeVisible({ timeout: 12000 });

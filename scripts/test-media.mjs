@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const host = "127.0.0.1";
 const key = "local-test-creation-key-only";
+const proxyKey = "5".repeat(64);
 const processes = [];
 const repository = fileURLToPath(new URL("../", import.meta.url));
 
@@ -70,6 +71,7 @@ logging:
     LIVEKIT_API_KEY: "devkey",
     LIVEKIT_API_SECRET: "secret",
     ROOM_CREATION_KEY: key,
+    ROOM_PROXY_KEY: proxyKey,
   });
   await Promise.all([
     ready(`http://${host}:${liveKitPort}/`, liveKit),
@@ -78,8 +80,8 @@ logging:
   const test = await start(process.execPath, [
     "node_modules/@playwright/test/cli.js", "test", ...process.argv.slice(2),
   ], {
-    BUZZ_TEST_ROOM_URL: `ws://${host}:${brokerPort}/rooms`,
-    BUZZ_TEST_CREATION_KEY: key,
+    BUZZ_TEST_UPSTREAM_URL: `ws://${host}:${brokerPort}`,
+    BUZZ_TEST_PROXY_KEY: proxyKey,
   });
   process.exitCode = test.code ?? 1;
 } finally {

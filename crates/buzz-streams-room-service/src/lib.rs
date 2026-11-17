@@ -9,7 +9,7 @@ use axum::{
         ws::{Message, WebSocket},
         State, WebSocketUpgrade,
     },
-    http::StatusCode,
+    http::{header::ORIGIN, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
     Router,
@@ -28,11 +28,12 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_INVITES: usize = 128;
 const MAX_HANDSHAKES: usize = 64;
 const MAX_MESSAGE_BYTES: usize = 2048;
+const PROXY_KEY_HEADER: &str = "x-buzz-streams-proxy-key";
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum Request {
-    Create { name: String, key: String },
+    Create { name: String, key: Option<String> },
     Join { name: String, code: String },
 }
 
@@ -67,6 +68,7 @@ pub struct RoomService {
     api_key: String,
     api_secret: String,
     creation_key_digest: [u8; 32],
+    proxy_key_digest: Option<[u8; 32]>,
     invitations: Mutex<HashMap<String, Room>>,
     handshakes: Arc<Semaphore>,
 }
@@ -78,12 +80,37 @@ impl RoomService {
             api_key,
             api_secret,
             creation_key_digest: Sha256::digest(creation_key.as_bytes()).into(),
+            proxy_key_digest: None,
             invitations: Mutex::default(),
             handshakes: Arc::new(Semaphore::new(MAX_HANDSHAKES)),
         }
     }
 
-    fn admit(&self, request: Request, now: u64) -> Result<Reply<'_>, &'static str> {
+    pub fn with_proxy_key(mut self, key: &str) -> Self {
+        self.proxy_key_digest = Some(Sha256::digest(key.as_bytes()).into());
+        self
+    }
+
+    fn trusted_proxy(&self, headers: &HeaderMap) -> bool {
+        let Some(expected) = &self.proxy_key_digest else {
+            return false;
+        };
+        let desktop_origin = matches!(
+            headers.get(ORIGIN).and_then(|origin| origin.to_str().ok()),
+            Some("tauri://localhost" | "http://tauri.localhost" | "https://tauri.localhost")
+        );
+        desktop_origin
+            && headers
+                .get(PROXY_KEY_HEADER)
+                .is_some_and(|value| matches_key(expected, value.as_bytes()))
+    }
+
+    fn admit(
+        &self,
+        request: Request,
+        now: u64,
+        trusted_proxy: bool,
+    ) -> Result<Reply<'_>, &'static str> {
         let mut invitations = self
             .invitations
             .lock()
@@ -91,9 +118,12 @@ impl RoomService {
         invitations.retain(|_, room| room.expires_at > now);
         let (name, room_name, invite) = match request {
             Request::Create { name, key } => {
-                let key_digest = Sha256::digest(key.as_bytes());
-                if !bool::from(self.creation_key_digest.ct_eq(key_digest.as_slice())) {
-                    return Err("The room creation key was rejected.");
+                if let Some(key) = key {
+                    if !matches_key(&self.creation_key_digest, key.as_bytes()) {
+                        return Err("The room creation key was rejected.");
+                    }
+                } else if !trusted_proxy {
+                    return Err("Quick sharing is unavailable here. Use Room service settings or contact your administrator.");
                 }
                 if invitations.len() >= MAX_INVITES {
                     return Err("The room service is busy.");
@@ -161,6 +191,10 @@ fn random_code() -> String {
     URL_SAFE_NO_PAD.encode(rand::random::<[u8; 24]>())
 }
 
+fn matches_key(expected: &[u8; 32], supplied: &[u8]) -> bool {
+    bool::from(expected.ct_eq(Sha256::digest(supplied).as_slice()))
+}
+
 pub fn router(rooms: RoomService) -> Router {
     Router::new()
         .route("/health", get(|| async { StatusCode::OK }))
@@ -168,19 +202,24 @@ pub fn router(rooms: RoomService) -> Router {
         .with_state(Arc::new(rooms))
 }
 
-async fn upgrade(State(rooms): State<Arc<RoomService>>, ws: WebSocketUpgrade) -> Response {
+async fn upgrade(
+    State(rooms): State<Arc<RoomService>>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Response {
     let Ok(permit) = rooms.handshakes.clone().try_acquire_owned() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
+    let trusted_proxy = rooms.trusted_proxy(&headers);
     ws.max_message_size(MAX_MESSAGE_BYTES)
         .max_frame_size(MAX_MESSAGE_BYTES)
         .on_upgrade(move |socket| async move {
             let _permit = permit;
-            let _ = timeout(REQUEST_TIMEOUT, admit_socket(socket, rooms)).await;
+            let _ = timeout(REQUEST_TIMEOUT, admit_socket(socket, rooms, trusted_proxy)).await;
         })
 }
 
-async fn admit_socket(mut socket: WebSocket, rooms: Arc<RoomService>) {
+async fn admit_socket(mut socket: WebSocket, rooms: Arc<RoomService>, trusted_proxy: bool) {
     let Some(Ok(Message::Text(message))) = socket.recv().await else {
         return;
     };
@@ -189,7 +228,7 @@ async fn admit_socket(mut socket: WebSocket, rooms: Arc<RoomService>) {
         .unwrap_or_default();
     let reply = serde_json::from_str::<Request>(&message)
         .map_err(|_| "Invalid room request.")
-        .and_then(|request| rooms.admit(request, now.as_millis() as u64))
+        .and_then(|request| rooms.admit(request, now.as_millis() as u64, trusted_proxy))
         .unwrap_or_else(|error| Reply::Error { error });
     if let Ok(text) = serde_json::to_string(&reply) {
         let _ = socket.send(Message::Text(text.into())).await;
@@ -212,13 +251,13 @@ mod tests {
         );
         let create = |key: &str| Request::Create {
             name: "Presenter".into(),
-            key: key.into(),
+            key: Some(key.into()),
         };
-        assert!(service.admit(create("incorrect"), 0).is_err());
+        assert!(service.admit(create("incorrect"), 0, false).is_err());
         let Reply::Admitted {
             invite: Some(invite),
             ..
-        } = service.admit(create(key), 0).unwrap()
+        } = service.admit(create(key), 0, false).unwrap()
         else {
             panic!("creator should get an invite");
         };
@@ -227,9 +266,44 @@ mod tests {
             code: invite.code.clone(),
         };
         assert!(matches!(
-            service.admit(join(), invite.expires_at - 1),
+            service.admit(join(), invite.expires_at - 1, false),
             Ok(Reply::Admitted { invite: None, .. })
         ));
-        assert!(service.admit(join(), invite.expires_at).is_err());
+        assert!(service.admit(join(), invite.expires_at, false).is_err());
+    }
+
+    #[test]
+    fn keyless_creation_requires_the_configured_proxy() {
+        let service = RoomService::new(
+            Url::parse("ws://127.0.0.1:7880").unwrap(),
+            "devkey".into(),
+            "secret".into(),
+            "test-creation-key",
+        )
+        .with_proxy_key("test-proxy-key");
+        let request = || Request::Create {
+            name: "Presenter".into(),
+            key: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(ORIGIN, "tauri://localhost".parse().unwrap());
+        for key in [None, Some("untrusted")] {
+            if let Some(key) = key {
+                headers.insert(PROXY_KEY_HEADER, key.parse().unwrap());
+            }
+            assert!(service
+                .admit(request(), 0, service.trusted_proxy(&headers))
+                .is_err());
+        }
+        headers.insert(PROXY_KEY_HEADER, "test-proxy-key".parse().unwrap());
+        assert!(service
+            .admit(request(), 0, service.trusted_proxy(&headers))
+            .is_ok());
+        for origin in ["https://example.org", "null"] {
+            headers.insert(ORIGIN, origin.parse().unwrap());
+            assert!(service
+                .admit(request(), 0, service.trusted_proxy(&headers))
+                .is_err());
+        }
     }
 }

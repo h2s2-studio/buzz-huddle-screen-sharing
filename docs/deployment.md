@@ -47,6 +47,22 @@ networking. Verify 7880, 7881, 7882, and 8091 are available before starting it.
 5. Give organizers `wss://streams.example.org/rooms` and the creation key. Test
    with two presenters and one viewer on the networks you expect users to use.
 
+## One-click sharing on a private community
+
+When the Buzz community hostname serves `/rooms`, **Share screen** uses that
+endpoint. For a private deployment with access enforced by your VPN or another
+authenticated proxy, set `ROOM_PROXY_KEY` to a separate `openssl rand -hex 32`
+value. Keep the broker on loopback. Configure only the private listener to send
+that value as `X-Buzz-Streams-Proxy-Key` upstream. The proxy must overwrite any
+client copy of the header and preserve `Origin`. A Caddy `header_up` directive
+in the `/rooms` handler does this. Restrict read access to the proxy secret
+config to the proxy's service user and the system administrator.
+
+The broker accepts a keyless create only with the configured proxy credential
+and a recognized Buzz desktop origin. The proxy and its network policy control
+who can start rooms. Use the regular creation key when you expose a service on
+a public listener. Joining a room still requires a session invite.
+
 Configure TLS with a certificate trusted by the stock Buzz webview. Session
 admission and LiveKit signaling use WebSockets. The SFU terminates WebRTC
 transport encryption to relay video to viewers.

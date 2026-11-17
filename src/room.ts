@@ -102,7 +102,7 @@ export function makeRoomSession() {
     emit({ ...idle, error });
   }
 
-  async function connect(brokerInput: string, request: RoomRequest) {
+  async function connect(brokerInput: string, request: RoomRequest, preset?: Preset) {
     if (active) return;
     let broker: string;
     try {
@@ -111,7 +111,7 @@ export function makeRoomSession() {
       return leave("Enter a secure room service URL ending in /rooms.");
     }
     const room = new Room({ dynacast: true });
-    const run: ActiveRoom = { room, abort: new AbortController(), quality: "auto", picking: false, stopping: false };
+    const run: ActiveRoom = { room, abort: new AbortController(), quality: "auto", picking: preset !== undefined, stopping: false };
     active = run;
     refresh(run, "connecting", "");
     const sync = () => refresh(run);
@@ -135,7 +135,19 @@ export function makeRoomSession() {
         if (active === run && snapshot.phase !== "connecting") leave("The sharing session disconnected.");
       });
 
+    let source: MediaStreamTrack | undefined;
     try {
+      if (preset) {
+        try {
+          source = await pickSource(run, preset);
+        } catch (error) {
+          if (active === run) leave(captureError(error));
+          return;
+        }
+        if (!source || active !== run) return;
+        run.picking = false;
+        refresh(run);
+      }
       const admission = await requestRoom(broker, request, run.abort.signal);
       if (active !== run) return;
       if (admission.invite) {
@@ -153,6 +165,9 @@ export function makeRoomSession() {
         await room.disconnect();
         return;
       }
+      if (source && preset) await publishSource(run, source, preset);
+      if (active !== run) return;
+      run.pending = undefined;
       // The SFU can advertise its encodings after announcing the publication.
       run.ticker = setInterval(sync, 2000);
       refresh(run, "connected", "");
@@ -208,6 +223,56 @@ export function makeRoomSession() {
     }
   }
 
+  async function pickSource(run: ActiveRoom, preset: Preset, previous?: Capture) {
+    const incoming = await captureScreen(preset);
+    const source = incoming.getVideoTracks()[0];
+    if (active !== run || run.publish !== previous) {
+      stopStream(incoming);
+      return;
+    }
+    if (!source || source.readyState !== "live") {
+      stopStream(incoming);
+      throw new Error("The selected source is unavailable.");
+    }
+    run.pending = source;
+    await limitCapture(source, preset);
+    if (active !== run || run.publish !== previous) return;
+    return source;
+  }
+
+  async function publishSource(run: ActiveRoom, source: MediaStreamTrack, preset: Preset, previous?: Capture) {
+    if (source.readyState !== "live") throw new Error("The selected source is unavailable.");
+    let published: LocalVideoTrack | undefined;
+    if (previous) {
+      published = await previous.published.replaceTrack(source);
+    } else {
+      const publication = await run.room.localParticipant.publishTrack(source, {
+        source: Track.Source.ScreenShare,
+        simulcast: true,
+        videoCodec: "vp8",
+        screenShareEncoding: presets[preset].video.encoding,
+        screenShareSimulcastLayers: preset === "sharp"
+          ? [VideoPresets.h360, VideoPresets.h720]
+          : [VideoPresets.h360],
+      });
+      published = publication.videoTrack;
+    }
+    if (active !== run || run.publish !== previous) return;
+    if (!published || source.readyState !== "live") {
+      if (published) await run.room.localParticipant.unpublishTrack(published);
+      if (previous) await stopSharing();
+      throw new Error("The selected source is unavailable.");
+    }
+    previous?.source.stop();
+    const surface = source.getSettings().displaySurface;
+    const label = source.label || ({ monitor: "Entire screen", window: "Window", browser: "Tab" }[surface ?? ""] ?? "Screen");
+    const capture = { source, published, label, preset };
+    run.publish = capture;
+    source.addEventListener("ended", () => {
+      if (active === run && run.publish === capture) void stopSharing();
+    }, { once: true });
+  }
+
   async function share(preset: Preset) {
     const run = active;
     if (!run || run.picking || run.stopping || snapshot.phase !== "connected") return;
@@ -215,46 +280,10 @@ export function makeRoomSession() {
     preset = previous?.preset ?? preset;
     run.picking = true;
     refresh(run, undefined, "");
-    let incoming: MediaStream | undefined;
     let source: MediaStreamTrack | undefined;
     try {
-      incoming = await captureScreen(preset);
-      source = incoming.getVideoTracks()[0];
-      if (active !== run || run.publish !== previous) return;
-      if (!source || source.readyState !== "live") throw new Error("The selected source is unavailable.");
-      run.pending = source;
-      await limitCapture(source, preset);
-      if (active !== run || run.publish !== previous) return;
-      let published: LocalVideoTrack | undefined;
-      if (previous) {
-        published = await previous.published.replaceTrack(source);
-      } else {
-        const high = presets[preset].video;
-        const publication = await run.room.localParticipant.publishTrack(source, {
-          source: Track.Source.ScreenShare,
-          simulcast: true,
-          videoCodec: "vp8",
-          screenShareEncoding: high.encoding,
-          screenShareSimulcastLayers: preset === "sharp"
-            ? [VideoPresets.h360, VideoPresets.h720]
-            : [VideoPresets.h360],
-        });
-        published = publication.videoTrack;
-      }
-      if (active !== run || run.publish !== previous) return;
-      if (!published || source.readyState !== "live") {
-        if (published) await run.room.localParticipant.unpublishTrack(published);
-        if (previous) void stopSharing();
-        throw new Error("The selected source is unavailable.");
-      }
-      previous?.source.stop();
-      const surface = source.getSettings().displaySurface;
-      const label = source.label || ({ monitor: "Entire screen", window: "Window", browser: "Tab" }[surface ?? ""] ?? "Screen");
-      const capture = { source, published, label, preset };
-      run.publish = capture;
-      source.addEventListener("ended", () => {
-        if (active === run && run.publish === capture) void stopSharing();
-      }, { once: true });
+      source = await pickSource(run, preset, previous);
+      if (source) await publishSource(run, source, preset, previous);
     } catch (error) {
       if (active === run && run.publish === previous) {
         if (previous && source && previous.published.mediaStreamTrack === source) {
@@ -264,10 +293,10 @@ export function makeRoomSession() {
             await stopSharing();
           }
         }
-        refresh(run, undefined, incoming ? "Couldn’t publish the selected source." : captureError(error));
+        refresh(run, undefined, source ? "Couldn’t publish the selected source." : captureError(error));
       }
     } finally {
-      if (run.publish?.source !== source) stopStream(incoming);
+      if (run.publish?.source !== run.pending) run.pending?.stop();
       run.pending = undefined;
       run.picking = false;
       refresh(run);

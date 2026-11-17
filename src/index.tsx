@@ -1,15 +1,22 @@
 import type * as ReactRuntime from "react";
 import { makeSoloTest, presets, type Preset, type SoloState } from "./capture";
-import { inviteFromParams, invitePage, nameLimit, parseInvite, type Invite } from "./protocol";
+import { communityBroker, inviteFromParams, invitePage, nameLimit, parseInvite, type Invite } from "./protocol";
 import { makeRoomSession } from "./room";
 
 type HuddlePhase = "idle" | "incoming" | "connecting" | "connected" | "leaving" | "error";
 type Effect = (setup: () => () => void) => void;
 type LauncherProps = { pressed: boolean; toggle: (target: string) => void; available: () => boolean };
+type ChannelContext = { relayUrl: string; viewer: string; scope: string };
 type Route = { version: number; params: unknown };
 type PageProps = { navigation?: { target: { route?: Route } } };
 type PluginContext = {
   react: typeof ReactRuntime;
+  relay: { snapshot(): {
+    origin?: string;
+    viewer?: string;
+    scope?: string;
+    session: { profiles: { snapshot(): ReadonlyMap<string, { name?: string }> } };
+  } };
   effect: Effect;
   inject: (
     keys: ["huddleStatus"],
@@ -17,7 +24,7 @@ type PluginContext = {
   ) => void;
   panels: { register(panel: {
     id: string; title: string; matches(value: string): boolean;
-    component: ReactRuntime.ComponentType;
+    component: ReactRuntime.ComponentType<{ channelContext?: ChannelContext }>;
     toolbar: ReactRuntime.ComponentType;
     channelLauncher: ReactRuntime.ComponentType<LauncherProps>;
     channelPlacement: "side";
@@ -29,10 +36,9 @@ type PluginContext = {
   }): void };
 };
 
-export const inject = ["react", "panels", "pages"];
+export const inject = ["react", "panels", "pages", "relay"];
 const panelTarget = "h2s2-screen-sharing";
 const brokerKey = "studio.h2s2.screen-sharing.room-service";
-const nameKey = "studio.h2s2.screen-sharing.name";
 
 const row: ReactRuntime.CSSProperties = {
   display: "flex", flexWrap: "wrap", alignItems: "center", gap: "var(--space-2, 8px)",
@@ -130,56 +136,91 @@ export function apply(ctx: PluginContext) {
     </div>;
   }
 
-  function RoomEntry({ entry }: { entry?: Invite }) {
-    const [mode, setMode] = useState<"join" | "create">("join");
-    const [name, setName] = useState(() => readSetting(nameKey));
-    const [broker, setBroker] = useState(() => readSetting(brokerKey));
-    const [key, setKey] = useState("");
-    const [invite, setInvite] = useState("");
+  function participantName(channel?: ChannelContext) {
+    const current = ctx.relay.snapshot();
+    const viewer = channel?.viewer ?? current.viewer;
+    const profile = viewer ? current.session.profiles.snapshot().get(viewer) : undefined;
+    const name = Array.from(profile?.name?.replace(/[\u0000-\u001f\u007f-\u009f]/gu, "").trim() ?? "")
+      .slice(0, nameLimit).join("");
+    return name || (viewer ? `Participant ${viewer.slice(0, 6)}` : "Participant");
+  }
+
+  function ShareQuality({ preset, change, disabled }: {
+    preset: Preset; change(value: Preset): void; disabled?: boolean;
+  }) {
+    return <label style={stack}>Share quality
+      <select value={preset} onChange={(event) => change(event.target.value as Preset)} disabled={disabled}>
+        {Object.entries(presets).map(([value, item]) => <option key={value} value={value}>{item.label}</option>)}
+      </select>
+    </label>;
+  }
+
+  function JoinInvite({ entry, channel }: { entry?: Invite; channel?: ChannelContext }) {
+    const [input, setInput] = useState("");
     const [error, setError] = useState("");
-    const parsed = entry ?? parseInvite(invite);
 
     function submit(event: ReactRuntime.FormEvent<HTMLFormElement>) {
       event.preventDefault();
       if (huddle !== "connected") return;
-      if (!name.trim()) return setError("Enter your display name.");
+      const invite = entry ?? parseInvite(input);
+      if (!invite) return setError("Paste a Buzz Streams invite link.");
       setError("");
-      if (mode === "create" && !entry) {
-        writeSetting(brokerKey, broker.trim());
-        void session.connect(broker, { type: "create", name: name.trim(), key });
-        setKey("");
-      } else {
-        if (!parsed) return setError("Paste a Buzz Streams invite link.");
-        void session.connect(parsed.broker, { type: "join", name: name.trim(), code: parsed.code });
-      }
-      writeSetting(nameKey, name.trim());
+      void session.connect(invite.broker, { type: "join", name: participantName(channel), code: invite.code });
     }
 
     return <form style={stack} onSubmit={submit}>
-      {!entry && <div style={row} aria-label="Sharing session">
-        <button type="button" aria-pressed={mode === "join"} onClick={() => { setMode("join"); setError(""); }}>Join a session</button>
-        <button type="button" aria-pressed={mode === "create"} onClick={() => { setMode("create"); setError(""); }}>Start a session</button>
-      </div>}
-      {entry && <p style={quiet}>Room service on {new URL(entry.broker).host}</p>}
-      <label style={stack}>Display name
-        <input style={field} value={name} onChange={(event) => setName(event.target.value)} maxLength={nameLimit} autoComplete="off" required />
-      </label>
-      {mode === "create" && !entry ? <>
-        <label style={stack}>Room service URL
-          <input style={field} value={broker} onChange={(event) => setBroker(event.target.value)} placeholder="wss://streams.example.org/rooms" maxLength={256} spellCheck={false} required />
-        </label>
-        <label style={stack}>Room creation key
-          <input style={field} type="password" value={key} onChange={(event) => setKey(event.target.value)} autoComplete="off" maxLength={256} required />
-        </label>
-      </> : !entry && <label style={stack}>Invite link
-        <input style={field} value={invite} onChange={(event) => setInvite(event.target.value)} spellCheck={false} autoComplete="off" required />
-      </label>}
-      <div style={row}><button type="submit">{mode === "create" && !entry ? "Create room" : "Join streams"}</button></div>
+      {entry
+        ? <p style={quiet}>Sharing session on {new URL(entry.broker).host}</p>
+        : <label style={stack}>Invite link
+          <input style={field} value={input} onChange={(event) => setInput(event.target.value)} spellCheck={false} autoComplete="off" required />
+        </label>}
+      <div style={row}><button type="submit">Join streams</button></div>
       {error && <p role="alert" style={quiet}>{error}</p>}
     </form>;
   }
 
-  function Surface({ entry }: { entry?: Invite }) {
+  function RoomEntry({ channel, preset, setPreset }: {
+    channel?: ChannelContext; preset: Preset; setPreset(value: Preset): void;
+  }) {
+    const automatic = communityBroker(channel?.relayUrl ?? ctx.relay.snapshot().origin);
+    const [broker, setBroker] = useState(() => readSetting(brokerKey) || automatic || "");
+    const [key, setKey] = useState("");
+
+    function share(url: string, key?: string) {
+      if (huddle !== "connected") return;
+      void session.connect(url, { type: "create", name: participantName(channel), key }, preset);
+    }
+
+    return <div style={stack}>
+      {automatic && <div style={row}>
+        <button type="button" onClick={() => share(automatic)}>Share screen</button>
+      </div>}
+      <ShareQuality preset={preset} change={setPreset} />
+      <details>
+        <summary>Join from an invite</summary>
+        <JoinInvite channel={channel} />
+      </details>
+      <details open={automatic ? undefined : true}>
+        <summary>Room service settings</summary>
+        <form style={stack} onSubmit={(event) => {
+          event.preventDefault();
+          writeSetting(brokerKey, broker.trim());
+          share(broker, key || undefined);
+          setKey("");
+        }}>
+          <label style={stack}>Room service URL
+            <input style={field} value={broker} onChange={(event) => setBroker(event.target.value)} placeholder="wss://streams.example.org/rooms" maxLength={256} spellCheck={false} required />
+          </label>
+          <label style={stack}>Room creation key, if required by your server
+            <input style={field} type="password" value={key} onChange={(event) => setKey(event.target.value)} autoComplete="off" maxLength={256} />
+          </label>
+          <div style={row}><button type="submit">Share with this service</button></div>
+        </form>
+      </details>
+    </div>;
+  }
+
+  function Surface({ entry, channel }: { entry?: Invite; channel?: ChannelContext }) {
     const phase = useSyncExternalStore(subscribe, () => huddle);
     const local = useSyncExternalStore(subscribe, () => solo);
     const room = useSyncExternalStore(session.subscribe, session.snapshot);
@@ -208,7 +249,9 @@ export function apply(ctx: PluginContext) {
     return <section style={{ ...stack, padding: "var(--space-panel-inset, 12px)", gap: "var(--space-3, 12px)" }}>
       {room.phase === "idle" && !local.active && <>
         {phase === "connected"
-          ? <RoomEntry key={entry?.code} entry={entry} />
+          ? entry
+            ? <JoinInvite key={entry.code} entry={entry} channel={channel} />
+            : <RoomEntry channel={channel} preset={preset} setPreset={setPreset} />
           : <p style={quiet}>Join a Huddle to share or watch a screen.</p>}
         <div style={row}><button type="button" onClick={() => {
           ownsSolo.current = true;
@@ -221,7 +264,7 @@ export function apply(ctx: PluginContext) {
         <div style={row}><button type="button" onClick={() => soloTest.stop()}>Stop test</button></div>
       </>}
       {room.phase === "connecting" && <div style={spread}>
-        <p role="status" style={quiet}>Joining sharing session…</p>
+        <p role="status" style={quiet}>{room.picking ? "Choose a source in the system picker…" : "Connecting streams…"}</p>
         <button type="button" onClick={() => session.leave()}>Cancel</button>
       </div>}
       {(room.phase === "connected" || room.phase === "reconnecting") && <>
@@ -235,11 +278,7 @@ export function apply(ctx: PluginContext) {
             <small style={quiet}>{presets[room.sharing.preset].label}</small>
           </>}
           <div style={spread}>
-            {!room.sharing && <label style={stack}>Share quality
-              <select value={preset} onChange={(event) => setPreset(event.target.value as Preset)} disabled={room.picking}>
-                {Object.entries(presets).map(([value, item]) => <option key={value} value={value}>{item.label}</option>)}
-              </select>
-            </label>}
+            {!room.sharing && <ShareQuality preset={preset} change={setPreset} disabled={room.picking} />}
             <button type="button" disabled={room.picking || room.stopping || room.phase !== "connected"} onClick={() => void session.share(preset)}>
               {room.sharing ? "Change source" : "Share screen"}
             </button>
@@ -304,7 +343,7 @@ export function apply(ctx: PluginContext) {
 
   ctx.panels.register({
     id: "screen-sharing", title: "Streams", matches: (value) => value === panelTarget,
-    component: Surface, toolbar: Toolbar, channelLauncher: Launcher, channelPlacement: "side",
+    component: ({ channelContext }) => <Surface channel={channelContext} />, toolbar: Toolbar, channelLauncher: Launcher, channelPlacement: "side",
   });
   ctx.pages.register({
     id: invitePage, title: "Streams", conversationNavigation: true,

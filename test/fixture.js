@@ -5,6 +5,9 @@ import { apply } from "../plugin.js";
 const cleanups = [];
 const phaseListeners = new Set();
 const query = new URLSearchParams(location.search);
+const viewer = query.get("viewer") || "Fixture";
+const origin = query.get("relay") || location.origin;
+const profiles = new Map([[viewer, { name: viewer }]]);
 let phase = query.has("solo") ? "idle" : "connected";
 let openedSockets = 0;
 let panel;
@@ -59,6 +62,7 @@ window.screenTest = {
 };
 apply({
   react: React,
+  relay: { snapshot: () => ({ viewer, origin, session: { profiles: { snapshot: () => profiles } } }) },
   panels: { register(contribution) { panel = contribution; } },
   pages: { register(contribution) { page = contribution; } },
   effect(setup) { cleanups.push(setup()); },
