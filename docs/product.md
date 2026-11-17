@@ -11,14 +11,15 @@ system and leaves microphone capture, voice, and conversation navigation with Bu
 - Open Streams with the monitor icon next to the conversation controls. A dot
   marks active capture even with the panel closed. The toolbar keeps a separate
   **Stop sharing** action available.
-- In a Huddle, **Share screen** opens the OS picker. When sharing starts, put
-  the source, **Change source**, **Copy invite link**, and **Stop sharing** before
-  the preview. Canceling the picker during a source change keeps the previous
-  source and preview.
-- **Your preview** displays the local capture. It is available before any viewers
-  join, and it can collapse to avoid capturing its own image when the presenter
-  shares the full desktop. Viewer playback and received resolution appear in a
-  separate player.
+- In a Huddle, **Share screen** opens the OS picker. The player shows the source
+  and maximum quality, with **Change source** and **Stop sharing** directly
+  below it. Canceling the picker keeps the existing share.
+- **Your preview** fills the player until you watch another presenter. While
+  watching, a compact local preview keeps your own controls accessible. **Hide
+  preview** keeps capture active while avoiding a recursive view.
+- The panel uses Buzz's button variants, typography, surfaces, and focus colors.
+  The live stream list sits alongside the player in a wide panel and stacks below
+  it in a narrow panel. **Copy invite link** and **Leave Streams** sit in the footer.
 - Opening an invite offers **Join streams**. Each live presenter has a
   **Watch stream** action. Watching, sharing, and voice each have their own
   stop action. **Leave Streams** ends the media session while voice continues.
@@ -69,18 +70,31 @@ identity and lifecycle.
 
 ## Upstream integration
 
-1. Have the Buzz relay associate screen-share admission with a live Huddle and
-   verified membership. The relay can issue a short-lived, screen-scoped
-   credential after checking the same authority that admits the voice call.
-2. Expose an opaque session handle and stream roster through the Huddle service.
-   Keep the media provider behind that service so voice teardown, departure,
-   and revocation stop screen tracks in the same lifecycle.
-3. Put the presenter picker, stream list, and controls in Buzz's native Huddle
-   surface as well as its conversation. Where the desktop webview needs a
-   host permission or capture bridge, implement that in the native Rust host.
-4. Validate the same watch and share behavior on macOS, Windows and Linux.
-   Exercise mixed-platform sessions on separate devices, source replacement
-   during watch, transport recovery, and Huddle teardown.
+### Put Streams in the Huddle window
+
+The [companion window](https://github.com/block/buzz-app/blob/main/src/bundled/huddles/window-entry.tsx)
+renders the built-in Huddle view in a separate webview. It receives a snapshot
+and sends predefined actions through the [Huddle bridge](https://github.com/block/buzz-app/blob/main/src/features/huddle/window.ts).
+The [plugin API](https://github.com/block/buzz-app/blob/main/docs/plugin-architecture.md#huddle-status)
+provides the call phase and the main shell's panel registry. Adding controls to
+the companion requires a change to Buzz itself.
+
+- Add a Buzz-owned screen-share button next to mute and chat. Give the player
+  the main call area when watching or previewing a share, with the participant
+  list and native call controls still visible.
+- Give the Huddle owner a narrowly scoped screen-sharing contribution, with a
+  versioned state and action contract. The companion renders Buzz-owned controls
+  from that state. Keep one media session per Huddle. Choose how the companion
+  presents its video explicitly, since the current bridge carries serializable
+  state and cannot move a `MediaStream` between webviews.
+- Tie admission and stream discovery to relay-verified Huddle membership. Issue
+  short-lived, screen-scoped credentials under the same authority as voice.
+  Joining voice would reveal streams and **Watch stream** would start an
+  individual subscription. Closing or minimizing the companion keeps the call
+  and share active. Leaving the Huddle stops capture and subscriptions.
+- Implement any webview capture permissions or bridges in the native Rust host.
+  Validate mixed-platform sessions on macOS, Windows and Linux, including
+  source replacement, recovery and teardown.
 
 Until then, the plugin uses one expiring invite per sharing session. Anyone
 with the invite can join during that window. A local “connected” phase is

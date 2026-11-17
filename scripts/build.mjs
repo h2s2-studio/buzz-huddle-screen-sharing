@@ -7,6 +7,7 @@ const result = await build({
   bundle: true,
   platform: "browser",
   format: "esm",
+  loader: { ".css": "text" },
   target: "es2022",
   minify: true,
   legalComments: "eof",

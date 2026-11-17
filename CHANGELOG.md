@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.3
+
+- Make the video the main surface for previewing your share and watching a presenter.
+- Group source, quality, fullscreen, and stop actions with the player. Keep
+  your own preview accessible when watching another stream.
+- Show live presenters beside the player when space allows and below it in a
+  narrow panel. Use native Buzz button styles and theme tokens.
+
 ## v0.3.2
 
 - Show a local preview while sharing. The preview follows source changes and

@@ -4,6 +4,8 @@ An H2S2 Studio plugin for sharing and watching screens inside Buzz Desktop.
 Multiple Huddle participants can publish at once. Viewers pick one stream,
 switch between presenters, and keep their Buzz voice call connected.
 
+![Watching Alex in the Streams player, with playback quality below and Riley’s stream available in the adjacent live streams list](docs/screenshots/streams-viewer.png)
+
 ## Install from GitHub
 
 In Buzz Desktop, open **Settings → Plugins → Manage plugins → Add**. Paste
@@ -39,8 +41,11 @@ close the panel to release capture.
    incoming resolution and offers **Fullscreen**. You can watch while sharing.
    **Change source** keeps the same stream and preserves the old source if canceled.
 
-**Your preview** shows the captured source on your device and can be collapsed
-while sharing continues.
+**Your preview** fills the player while you share. When you watch another
+presenter, your own preview moves alongside the stream list. **Hide preview**
+keeps the share live and helps avoid a recursive view when sharing your desktop.
+
+![The narrow presenter panel showing the local preview, change source, fullscreen, and stop sharing controls](docs/screenshots/streams-presenter.png)
 
 **Stop sharing** is also available in the Buzz toolbar while capture is active.
 Switching conversations keeps the stream open. Leaving the Huddle ends the

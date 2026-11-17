@@ -84,11 +84,15 @@ test("starts sharing without setup and switches streams in a three-member room",
     const previewTrack = (page) => preview(page).evaluate((element) => element.srcObject?.getVideoTracks()[0]?.id);
     const originalSource = await previewTrack(first);
     expect(originalSource).toBeTruthy();
-    await first.getByText("Your preview", { exact: true }).click();
+    await first.getByRole("button", { name: "Hide preview" }).click();
     await expect(preview(first)).toBeHidden();
     expect(await first.evaluate(() => window.screenTest.captureStates())).toEqual(["live"]);
-    await first.getByText("Your preview", { exact: true }).click();
+    await first.getByRole("button", { name: "Show preview" }).click();
     await expect(preview(first)).toBeVisible();
+    const localVideoBox = await preview(first).boundingBox();
+    const stageBox = await first.locator(".h2s2-stage").boundingBox();
+    expect(localVideoBox.width / stageBox.width).toBeGreaterThan(0.98);
+    expect(localVideoBox.height).toBeGreaterThan(150);
 
     await expect(first.getByLabel("Session invite")).toHaveCount(0);
     await copyInvite.click();
@@ -122,6 +126,12 @@ test("starts sharing without setup and switches streams in a three-member room",
 
     await watch(page, "Alex").click();
     await expectPlayback(page);
+    const streams = page.getByRole("complementary", { name: "Live streams" });
+    await page.setViewportSize({ width: 920, height: 740 });
+    expect((await streams.boundingBox()).x).toBeGreaterThan((await video(page).boundingBox()).x);
+    await page.setViewportSize({ width: 340, height: 640 });
+    expect((await streams.boundingBox()).y).toBeGreaterThan((await video(page).boundingBox()).y);
+    await page.setViewportSize({ width: 920, height: 740 });
     if (browserName === "chromium") {
       await page.getByRole("button", { name: "Fullscreen" }).click();
       await expect.poll(() => page.evaluate(() => document.fullscreenElement?.tagName)).toBe("VIDEO");
@@ -136,6 +146,7 @@ test("starts sharing without setup and switches streams in a three-member room",
 
     await watch(page, "Riley").click();
     await expect(page.getByText("Watching Riley")).toBeVisible();
+    await expect(watch(page, "Riley")).toHaveAttribute("aria-pressed", "true");
     await expectPlayback(page);
     await watch(page, "Alex").click();
     await expectPlayback(page);
