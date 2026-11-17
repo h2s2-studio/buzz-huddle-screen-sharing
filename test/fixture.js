@@ -13,7 +13,17 @@ let openedSockets = 0;
 let panel;
 let page;
 let rejectCapture = false;
+let clipboardBlocked = false;
+let clipboardText = "";
 const captures = [];
+Object.defineProperty(navigator, "clipboard", {
+  value: {
+    async writeText(text) {
+      if (clipboardBlocked) throw new DOMException("Clipboard blocked", "NotAllowedError");
+      clipboardText = text;
+    },
+  },
+});
 const NativeSocket = window.WebSocket;
 window.WebSocket = class extends NativeSocket {
   constructor(...args) {
@@ -57,6 +67,8 @@ window.screenTest = {
     for (const listener of phaseListeners) listener();
   },
   cancelNextCapture() { rejectCapture = true; },
+  blockClipboard() { clipboardBlocked = true; },
+  clipboardText: () => clipboardText,
   captureStates: () => captures.map((track) => track.readyState),
   openedSockets: () => openedSockets,
 };

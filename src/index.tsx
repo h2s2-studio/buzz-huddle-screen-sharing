@@ -92,7 +92,14 @@ export function apply(ctx: PluginContext) {
   });
   ctx.effect(() => () => { session.leave(); soloTest.stop(); });
 
-  function ScreenVideo({ stream, fullscreen = false }: { stream: MediaStream; fullscreen?: boolean }) {
+  function ScreenVideo({
+    stream, fullscreen = false, label = "Shared screen", maxHeight = "65vh",
+  }: {
+    stream: MediaStream;
+    fullscreen?: boolean;
+    label?: string;
+    maxHeight?: string;
+  }) {
     const video = useRef<HTMLVideoElement>(null);
     const [height, setHeight] = useState(0);
     const [error, setError] = useState("");
@@ -121,12 +128,12 @@ export function apply(ctx: PluginContext) {
     }
     return <div style={stack}>
       <video
-        aria-label="Shared screen"
+        aria-label={label}
         ref={video}
         autoPlay muted playsInline
         onResize={measure}
         onLoadedMetadata={measure}
-        style={{ width: "100%", maxHeight: "65vh", background: "var(--surface-panel, #202024)", objectFit: "contain" }}
+        style={{ width: "100%", maxHeight, background: "var(--surface-panel, #202024)", objectFit: "contain" }}
       />
       {fullscreen && <div style={spread}>
         <span style={quiet}>{height ? `Receiving ${height}p` : "Waiting for video…"}</span>
@@ -225,28 +232,33 @@ export function apply(ctx: PluginContext) {
     const local = useSyncExternalStore(subscribe, () => solo);
     const room = useSyncExternalStore(session.subscribe, session.snapshot);
     const [preset, setPreset] = useState<Preset>("balanced");
-    const [copyStatus, setCopyStatus] = useState("");
+    const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "manual">("idle");
     const ownsSolo = useRef(false);
     const inviteField = useRef<HTMLInputElement>(null);
     const invite = room.invite;
     useEffect(() => () => { if (ownsSolo.current) soloTest.stop(); }, []);
-    useEffect(() => { setCopyStatus(""); }, [invite?.link]);
+    useEffect(() => { setCopyStatus("idle"); }, [invite?.link]);
+    useEffect(() => {
+      if (copyStatus === "manual") {
+        inviteField.current?.focus();
+        inviteField.current?.select();
+      }
+    }, [copyStatus]);
 
     async function copyInvite() {
       if (!invite || Date.now() >= invite.expiresAt) return;
       try {
         await navigator.clipboard.writeText(invite.link);
-        setCopyStatus("Invite copied.");
+        setCopyStatus("copied");
       } catch {
-        inviteField.current?.focus();
-        inviteField.current?.select();
-        setCopyStatus("Link selected. Use your copy shortcut.");
+        setCopyStatus("manual");
       }
     }
 
     const watching = room.streams.find((stream) => stream.id === room.watching);
     const expiredInvite = invite && Date.now() >= invite.expiresAt;
     return <section style={{ ...stack, padding: "var(--space-panel-inset, 12px)", gap: "var(--space-3, 12px)" }}>
+      {(local.error || room.error) && <p role="alert" style={quiet}>{room.error || local.error}</p>}
       {room.phase === "idle" && !local.active && <>
         {phase === "connected"
           ? entry
@@ -269,22 +281,37 @@ export function apply(ctx: PluginContext) {
       </div>}
       {(room.phase === "connected" || room.phase === "reconnecting") && <>
         <div style={{ ...stack, ...divider }}>
-          <div style={spread}>
-            <strong>{room.sharing ? "You’re sharing" : "Screen sharing"}</strong>
-            {room.sharing && <button type="button" onClick={() => void session.stopSharing()}>Stop sharing</button>}
-          </div>
           {room.sharing && <>
+            <div style={spread}>
+              <strong>You’re sharing</strong>
+              <button type="button" onClick={() => void session.stopSharing()}>Stop sharing</button>
+            </div>
             <span style={ellipsis} title={room.sharing.label}>{room.sharing.label}</span>
             <small style={quiet}>{presets[room.sharing.preset].label}</small>
           </>}
-          <div style={spread}>
+          <div style={row}>
             {!room.sharing && <ShareQuality preset={preset} change={setPreset} disabled={room.picking} />}
             <button type="button" disabled={room.picking || room.stopping || room.phase !== "connected"} onClick={() => void session.share(preset)}>
               {room.sharing ? "Change source" : "Share screen"}
             </button>
+            {invite && !expiredInvite && <button type="button" onClick={() => void copyInvite()}>Copy invite link</button>}
           </div>
+          {expiredInvite && <p style={quiet}>The invite has expired.</p>}
+          {invite && !expiredInvite && copyStatus === "copied" && <p role="status" style={quiet}>Invite copied.</p>}
+          {invite && !expiredInvite && copyStatus === "manual" && <label style={stack}>Session invite
+            <input style={field} ref={inviteField} value={invite.link} readOnly onFocus={(event) => event.target.select()} />
+            <span style={quiet}>Use your copy shortcut.</span>
+          </label>}
           {room.picking && <p role="status" style={quiet}>Choose a source in the system picker…</p>}
           {room.stopping && <p role="status" style={quiet}>Stopping the stream…</p>}
+          {room.sharing && <details open>
+            <summary>Your preview</summary>
+            <ScreenVideo
+              stream={room.sharing.preview}
+              label="Your stream preview"
+              maxHeight={watching ? "min(18vh, 100px)" : "min(28vh, 180px)"}
+            />
+          </details>}
         </div>
         {room.phase === "reconnecting" && <p role="status" style={quiet}>Reconnecting to the sharing session…</p>}
         {watching && <div style={{ ...stack, ...divider }}>
@@ -314,23 +341,38 @@ export function apply(ctx: PluginContext) {
             </button>
           </div>)}
         </div>
-        {invite && <div style={{ ...stack, ...divider }}>
-          {expiredInvite ? <p style={quiet}>The invite has expired.</p> : <>
-            <label style={stack}>Session invite
-              <input style={field} ref={inviteField} value={invite.link} readOnly onFocus={(event) => event.target.select()} />
-            </label>
-            <div style={row}><button type="button" onClick={() => void copyInvite()}>Copy invite link</button></div>
-          </>}
-          {copyStatus && <p role="status" style={quiet}>{copyStatus}</p>}
-        </div>}
-        <div style={row}><button type="button" onClick={() => session.leave()}>Leave sharing session</button></div>
+        <div style={row}><button type="button" aria-description="Your voice Huddle stays connected." onClick={() => session.leave()}>Leave Streams</button></div>
       </>}
-      {(local.error || room.error) && <p role="alert" style={quiet}>{room.error || local.error}</p>}
     </section>;
   }
 
   function Launcher({ pressed, toggle, available }: LauncherProps) {
-    return <button type="button" aria-pressed={pressed} onClick={() => { if (available()) toggle(panelTarget); }}>Streams</button>;
+    const room = useSyncExternalStore(session.subscribe, session.snapshot);
+    const live = Boolean(room.sharing);
+    return <button
+      type="button"
+      className="buzz-button"
+      data-buzz-ui=""
+      data-variant="ghost"
+      data-size="sm"
+      data-icon-variant="ghost"
+      data-icon-size="toolbar"
+      data-icon-shape="control"
+      aria-label="Streams"
+      aria-description={live ? "You’re sharing your screen." : undefined}
+      aria-pressed={pressed}
+      title={live ? "Streams — you’re sharing" : "Streams"}
+      onClick={() => { if (available()) toggle(panelTarget); }}
+    >
+      <span className="buzz-button-label">
+        <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2.5" y="4" width="19" height="13" rx="2" />
+          <path d="M8 21h8m-4-4v4" />
+          {live && <circle cx="19.5" cy="5" r="3.5" fill="var(--status-online, #2a8b57)" stroke="var(--surface-panel, Canvas)" />}
+        </svg>
+      </span>
+    </button>;
   }
 
   function Toolbar() {

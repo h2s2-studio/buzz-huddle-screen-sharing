@@ -6,6 +6,26 @@ admission tokens. LiveKit forwards each screen track to the participants who
 choose to watch it. The plugin requests the active screen through the operating
 system and leaves microphone capture, voice, and conversation navigation with Buzz.
 
+## Desktop flow
+
+- Open Streams with the monitor icon next to the conversation controls. A dot
+  marks active capture even with the panel closed. The toolbar keeps a separate
+  **Stop sharing** action available.
+- In a Huddle, **Share screen** opens the OS picker. When sharing starts, put
+  the source, **Change source**, **Copy invite link**, and **Stop sharing** before
+  the preview. Canceling the picker during a source change keeps the previous
+  source and preview.
+- **Your preview** displays the local capture. It is available before any viewers
+  join, and it can collapse to avoid capturing its own image when the presenter
+  shares the full desktop. Viewer playback and received resolution appear in a
+  separate player.
+- Opening an invite offers **Join streams**. Each live presenter has a
+  **Watch stream** action. Watching, sharing, and voice each have their own
+  stop action. **Leave Streams** ends the media session while voice continues.
+- Keep the panel usable when clipboard access is denied by focusing a
+  selectable copy of the invite. Show picker and connection errors above the
+  current controls so the user can retry without looking below the player.
+
 ## How the implementation fits the Buzz codebase
 
 - The Rust room service mirrors the conventions in

@@ -7,7 +7,13 @@ import { captureError, captureScreen, limitCapture, presets, stopStream, type Pr
 import { inviteLink, socketUrl, type RoomRequest } from "./protocol";
 
 type RoomPhase = "idle" | "connecting" | "connected" | "reconnecting";
-type Capture = { source: MediaStreamTrack; published: LocalVideoTrack; label: string; preset: Preset };
+type Capture = {
+  source: MediaStreamTrack;
+  published: LocalVideoTrack;
+  label: string;
+  preset: Preset;
+  preview: MediaStream;
+};
 type ActiveRoom = {
   room: Room;
   abort: AbortController;
@@ -29,7 +35,7 @@ export type RoomSnapshot = {
   invite?: ActiveRoom["invite"];
   picking: boolean;
   stopping: boolean;
-  sharing?: Pick<Capture, "label" | "preset">;
+  sharing?: Pick<Capture, "label" | "preset" | "preview">;
   streams: Stream[];
   watching?: string;
   video?: MediaStream;
@@ -84,7 +90,9 @@ export function makeRoomSession() {
     }
     emit({
       phase, error, streams, invite: run.invite, picking: run.picking, stopping: run.stopping,
-      sharing: run.publish && { label: run.publish.label, preset: run.publish.preset },
+      sharing: run.publish && {
+        label: run.publish.label, preset: run.publish.preset, preview: run.publish.preview,
+      },
       watching: run.watching?.trackSid, video: run.remote, quality: run.quality, layers: available,
     });
   }
@@ -266,7 +274,7 @@ export function makeRoomSession() {
     previous?.source.stop();
     const surface = source.getSettings().displaySurface;
     const label = source.label || ({ monitor: "Entire screen", window: "Window", browser: "Tab" }[surface ?? ""] ?? "Screen");
-    const capture = { source, published, label, preset };
+    const capture = { source, published, label, preset, preview: new MediaStream([source]) };
     run.publish = capture;
     source.addEventListener("ended", () => {
       if (active === run && run.publish === capture) void stopSharing();

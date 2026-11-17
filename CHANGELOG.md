@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.2
+
+- Show a local preview while sharing. The preview follows source changes and
+  can be collapsed while the share continues.
+- Use a monitor icon in the conversation header with an active-sharing marker.
+- Place the share, invite and stop controls above the preview. Offer a selectable
+  invite link when clipboard access is denied.
+
 ## v0.3.1
 
 - Open the system picker directly from **Share screen**. Create a room after

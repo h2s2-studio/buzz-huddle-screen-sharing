@@ -24,6 +24,7 @@ test.afterAll(async () => { await site.close(); });
 
 const launcher = (page) => page.getByRole("button", { name: "Streams", exact: true });
 const video = (page) => page.locator('video[aria-label="Shared screen"]');
+const preview = (page) => page.getByLabel("Your stream preview", { exact: true });
 const watch = (page, name) => page.getByRole("button", { name: `Watch ${name}’s stream` });
 
 async function expectPlayback(page) {
@@ -34,6 +35,8 @@ async function expectPlayback(page) {
 
 test("tests the screen on one device without a Huddle or a signaling connection", async ({ page }) => {
   await page.goto(`${fixture}?solo`);
+  await expect(launcher(page).locator("svg")).toBeVisible();
+  await expect(launcher(page)).toHaveText("");
   await launcher(page).click();
   await page.getByRole("button", { name: "Test my screen", exact: true }).click();
   await expect(video(page)).toBeVisible();
@@ -59,6 +62,7 @@ test("starts sharing without setup and switches streams in a three-member room",
   try {
     const first = await (other ?? context).newPage();
     const second = await (other ?? context).newPage();
+    await first.setViewportSize({ width: 340, height: 640 });
     await Promise.all([
       first.goto(`${fixture}?viewer=Alex`),
       second.goto(`${fixture}?viewer=Riley`),
@@ -72,8 +76,32 @@ test("starts sharing without setup and switches streams in a three-member room",
     expect(await first.evaluate(() => window.screenTest.openedSockets())).toBe(0);
     await first.getByLabel("Share quality").selectOption("sharp");
     await first.getByRole("button", { name: "Share screen", exact: true }).click();
-    await expect(first.getByLabel("Session invite")).toBeVisible({ timeout: 15000 });
-    const invite = await first.getByLabel("Session invite").inputValue();
+    const copyInvite = first.getByRole("button", { name: "Copy invite link", exact: true });
+    await expect(copyInvite).toBeVisible({ timeout: 15000 });
+    await expect(launcher(first)).toHaveAttribute("aria-description", "You’re sharing your screen.");
+    await expect(preview(first)).toBeVisible();
+    await expect.poll(() => preview(first).evaluate((element) => element.currentTime)).toBeGreaterThan(0);
+    const previewTrack = (page) => preview(page).evaluate((element) => element.srcObject?.getVideoTracks()[0]?.id);
+    const originalSource = await previewTrack(first);
+    expect(originalSource).toBeTruthy();
+    await first.getByText("Your preview", { exact: true }).click();
+    await expect(preview(first)).toBeHidden();
+    expect(await first.evaluate(() => window.screenTest.captureStates())).toEqual(["live"]);
+    await first.getByText("Your preview", { exact: true }).click();
+    await expect(preview(first)).toBeVisible();
+
+    await expect(first.getByLabel("Session invite")).toHaveCount(0);
+    await copyInvite.click();
+    await expect(first.getByText("Invite copied.", { exact: true })).toBeVisible();
+    const invite = await first.evaluate(() => window.screenTest.clipboardText());
+    expect(invite).toMatch(/^buzz:\/\/plugin/);
+    await first.evaluate(() => window.screenTest.blockClipboard());
+    await copyInvite.click();
+    const manualInvite = first.getByLabel("Session invite");
+    await expect(manualInvite).toHaveValue(invite);
+    await expect(manualInvite).toBeFocused();
+    expect(await first.locator("section").evaluate((section) =>
+      section.scrollWidth <= section.clientWidth)).toBe(true);
 
     await launcher(second).click();
     await second.getByText("Join from an invite", { exact: true }).click();
@@ -90,6 +118,7 @@ test("starts sharing without setup and switches streams in a three-member room",
     await expect(video(page)).toHaveCount(0);
     await watch(second, "Alex").click();
     await expectPlayback(second);
+    await expect(preview(second)).toBeVisible();
 
     await watch(page, "Alex").click();
     await expectPlayback(page);
@@ -116,8 +145,12 @@ test("starts sharing without setup and switches streams in a three-member room",
     await first.getByRole("button", { name: "Change source" }).click();
     await expect(first.getByRole("alert")).toHaveText("Screen selection canceled or permission was denied.");
     await expect(first.getByText("Window 1")).toBeVisible();
+    expect(await previewTrack(first)).toBe(originalSource);
     await first.getByRole("button", { name: "Change source" }).click();
     await expect(first.getByText("Window 2")).toBeVisible();
+    await expect.poll(() => preview(first).evaluate((element) =>
+      element.srcObject?.getVideoTracks()[0]?.label)).toBe("Window 2");
+    await expect.poll(() => preview(first).evaluate((element) => element.currentTime)).toBeGreaterThan(0);
     expect(await first.evaluate(() => window.screenTest.captureStates())).toEqual(["ended", "live"]);
     expect(await video(page).evaluate((element) => element.srcObject.id)).toBe(streamBefore);
 
@@ -128,9 +161,13 @@ test("starts sharing without setup and switches streams in a three-member room",
       .getByRole("button", { name: "Stop sharing" }).click({ timeout: 5000 });
     await expect(watch(page, "Alex")).toHaveCount(0);
     expect(await first.evaluate(() => window.screenTest.captureStates())).toEqual(["ended", "ended"]);
+    await expect(launcher(first)).not.toHaveAttribute("aria-description", "You’re sharing your screen.");
+    await launcher(first).click();
+    await expect(preview(first)).toHaveCount(0);
 
     await second.evaluate(() => window.screenTest.leave());
     await expect(second.getByText("Join a Huddle to share or watch a screen.")).toBeVisible();
+    await expect(preview(second)).toHaveCount(0);
     await expect(watch(page, "Riley")).toHaveCount(0);
     expect(await second.evaluate(() => window.screenTest.captureStates())).toEqual(["ended"]);
   } finally {
